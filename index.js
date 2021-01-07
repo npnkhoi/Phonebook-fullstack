@@ -1,4 +1,3 @@
-const { request } = require('express')
 const express = require('express')
 const app = express()
 app.use(express.json())
@@ -18,45 +17,32 @@ app.use(morgan(function (tokens, req, res) {
   ].join(' ')
 }))
 
-let persons = [
-  {
-    "name": "minh",
-    "number": "123",
-    "id": 5
-  },
-  {
-    "name": "nam anh",
-    "number": "456",
-    "id": 6
-  }
-]
+const Person = require('./models/Person')
 
 app.get('/', (request, response) => {
   response.send('Hello world');
 })
 
 app.get('/api/persons', (request, response) => {
-  response.json(persons);
+  Person.find({}).then(result => {
+    response.json(result)
+  })
 })
 
-app.get('/api/persons/:id', (request, response) => {
-  const id = Number(request.params.id)
-  const person = persons.find(person => person.id === id)
-  if (person) {
-    response.json(person)
-  } else {
-    response.status(404).end()
-  }
+app.get('/api/persons/:id', (request, response, next) => {
+  const id = request.params.id
+  Person.findById(id)
+  .then(person => {
+    if (person) {
+      response.json(person)
+    } else {
+      response.status(404).end()
+    }
+  })
+  .catch(err => next(error))    
 })
 
-const generateId = () => {
-  const maxId = persons.length > 0
-    ? Math.max(...persons.map(n => n.id))
-    : 0
-  return maxId + 1
-}
-
-app.post('/api/persons', (request, response) => {
+app.post('/api/persons', (request, response, next) => {
   const body = request.body
 
   if (!body.name || !body.number) {
@@ -65,31 +51,49 @@ app.post('/api/persons', (request, response) => {
     })
   }
 
-  if (persons.find(person => person.name === body.name)) {
-    return response.status(400).json({
-      error: 'Name must be unique'
-    })
-  }
-
-  const person = {
+  const person = new Person({
     name: body.name,
-    number: body.number,
-    id: generateId(),
-  }
-
-  persons = persons.concat(person)
-
-  response.json(person)
+    number: body.number
+  })
+  
+  person.save()
+  .then(result => {
+    console.log(`added ${body.name} number ${body.number} to phonebook.`)
+    response.json(result)
+  })
+  .catch((err) => next(err))
 })
 
-app.delete('/api/persons/:id', (request, response) => {
-  const id = Number(request.params.id)
-  persons = persons.filter(person => person.id !== id)
-  response.status(204).end()
+app.delete('/api/persons/:id', (request, response, next) => {
+  const id = request.params.id
+  Person.findByIdAndDelete(id)
+    .then(result => {
+      console.log(`Deleted user id ${id} with this response: ${result}`);
+      response.json(result)
+    })
+    .catch(err => next(err))
 })
 
-app.get('/info', (request, response) => {
-  response.send(`Phonebook has info for ${persons.length} people.\n\n${Date()}`)
+app.put('/api/persons/:id', (request, response, next) => {
+  const newPerson = request.body
+  const id = request.params.id
+  Person.findByIdAndUpdate(id, newPerson)
+    .then(result => {
+      if (result) {
+        response.json(result)
+      } else {
+        response.status(404).send({error: 'Document not found'})
+      }
+    })
+    .catch(err => next(err))
+})
+
+app.get('/info', (request, response, next) => {
+  Person.find({})
+    .then(persons => {
+      response.send(`Phonebook has info for ${persons.length} people.\n\n${Date()}`)
+    })
+    .catch(err => next(err))
 })
 
 const unknownEndpoint = (request, response) => {
@@ -97,6 +101,15 @@ const unknownEndpoint = (request, response) => {
 }
 
 app.use(unknownEndpoint)
+
+const errorHandler = (error, request, response, next) => {
+  console.log(error.message);
+  if (error.name === 'CastError') {
+    response.status(400).send({error: "Malformed id"})
+  }
+  next(error)
+}
+app.use(errorHandler)
 
 const PORT = process.env.PORT || 3001
 app.listen(PORT)
